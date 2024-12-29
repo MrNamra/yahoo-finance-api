@@ -228,13 +228,13 @@ class ResultDecoder
 
         foreach (['open', 'high', 'low', 'close', 'volume'] as $column) {
             $columnValue = $json['indicators']['quote'][0][$column][$index];
-            if (!is_numeric($columnValue) && 'null' !== $columnValue) {
+            if (!is_numeric($columnValue) && 'null' !== $columnValue && !\is_null($columnValue)) {
                 throw new ApiException(\sprintf('Not a number in column "%s": %s', $column, $column), ApiException::INVALID_VALUE);
             }
         }
 
         $columnValue = $json['indicators']['adjclose'][0]['adjclose'][$index];
-        if (!is_numeric($columnValue) && 'null' !== $columnValue) {
+        if (!is_numeric($columnValue) && 'null' !== $columnValue && !\is_null($columnValue)) {
             throw new ApiException(\sprintf('Not a number in column "%s": %s', 'adjclose', 'adjclose'), ApiException::INVALID_VALUE);
         }
 
