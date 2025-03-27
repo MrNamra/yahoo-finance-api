@@ -20,7 +20,7 @@ class ResultDecoder
     public const HISTORICAL_DATA_HEADER_LINE = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'];
     public const DIVIDEND_DATA_HEADER_LINE = ['Date', 'Dividends'];
     public const SPLIT_DATA_HEADER_LINE = ['Date', 'Stock Splits'];
-    public const SEARCH_RESULT_FIELDS = ['symbol', 'name', 'exch', 'type', 'exchDisp', 'typeDisp'];
+    public const SEARCH_RESULT_FIELDS = ['symbol', 'shortname', 'exchange', 'quoteType', 'exchDisp', 'typeDisp'];
     public const OPTION_CHAIN_FIELDS_MAP = [
         'underlyingSymbol' => ValueMapperInterface::TYPE_STRING,
         'expirationDates' => ValueMapperInterface::TYPE_ARRAY,
@@ -137,13 +137,13 @@ class ResultDecoder
     public function transformSearchResult(string $responseBody): array
     {
         $decoded = json_decode($responseBody, true);
-        if (!isset($decoded['data']['items']) || !\is_array($decoded['data']['items'])) {
+        if (!isset($decoded['quotes']) || !\is_array($decoded['quotes'])) {
             throw new ApiException('Yahoo Search API returned an invalid response', ApiException::INVALID_RESPONSE);
         }
 
         return array_map(function (array $item) {
             return $this->createSearchResultFromJson($item);
-        }, $decoded['data']['items']);
+        }, $decoded['quotes']);
     }
 
     private function createSearchResultFromJson(array $json): SearchResult
@@ -155,9 +155,9 @@ class ResultDecoder
 
         return new SearchResult(
             $json['symbol'],
-            $json['name'],
-            $json['exch'],
-            $json['type'],
+            $json['shortname'],
+            $json['exchange'],
+            $json['quoteType'],
             $json['exchDisp'],
             $json['typeDisp']
         );

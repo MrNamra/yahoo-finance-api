@@ -56,7 +56,7 @@ class ApiClientIntegrationTest extends TestCase
         $this->assertNotNull($aaplStock, 'Search result must contain AAPL');
 
         $this->assertEquals('Apple Inc.', $aaplStock->getName());
-        $this->assertEquals('S', $aaplStock->getType());
+        $this->assertEquals('EQUITY', $aaplStock->getType());
         $this->assertEquals('NASDAQ', $aaplStock->getExchDisp());
         $this->assertEquals('Equity', $aaplStock->getTypeDisp());
 

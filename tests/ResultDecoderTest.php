@@ -66,13 +66,13 @@ class ResultDecoderTest extends TestCase
 
         $this->assertIsArray($returnedResult);
         $this->assertContainsOnlyInstancesOf(SearchResult::class, $returnedResult);
-        $this->assertCount(10, $returnedResult);
+        $this->assertCount(7, $returnedResult);
 
         $expectedItem = new SearchResult(
             'AAPL',
             'Apple Inc.',
-            'NAS',
-            'S',
+            'NMS',
+            'EQUITY',
             'NASDAQ',
             'Equity'
         );
@@ -563,16 +563,13 @@ class ResultDecoderTest extends TestCase
     public function transformSearchResult_jsonWithMissedFieldGiven_createSearchResultFromJson(): void
     {
         $jsonArray = [
-            'data' => [
-                'items' => [
-                    ['quoteSourceName' => 'Nasdaq Real Time Price'],
-                    ['currency' => 'USD'],
-                ],
+            'quotes' => [
+                ['shortname' => 'Test'],
             ],
         ];
 
         $this->expectException(ApiException::class);
-        $this->expectExceptionMessage('Search result is missing fields: symbol, name, exch, type, exchDisp, typeDisp');
+        $this->expectExceptionMessage('Search result is missing fields: symbol, exchange, quoteType, exchDisp, typeDisp');
 
         $this->resultDecoder->transformSearchResult(json_encode($jsonArray));
     }
