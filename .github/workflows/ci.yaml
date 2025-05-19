@@ -81,6 +81,9 @@ jobs:
                     extensions: 'json'
                     php-version: '${{ matrix.php-version }}'
 
+            -   name: 'Setup curl-impersonate'
+                run: bin/setup-curl-impersonate.sh
+
             -   name: 'Display PHP versions'
                 run: |
                     php -r 'foreach (get_loaded_extensions() as $extension) echo $extension . " " . phpversion($extension) . PHP_EOL;'
@@ -97,6 +100,9 @@ jobs:
 
             -   name: 'Run tests'
                 run: vendor/bin/phpunit
+                env:
+                    LD_PRELOAD: ~/curl-impersonate/libcurl-impersonate-chrome.so
+                    CURL_IMPERSONATE: chrome116
 
     code-coverage:
         name: 'Code Coverage - PHP ${{ matrix.php-version }}'
@@ -121,6 +127,9 @@ jobs:
                     extensions: 'json'
                     php-version: '${{ matrix.php-version }}'
 
+            -   name: 'Setup curl-impersonate'
+                run: bin/setup-curl-impersonate.sh
+
             -   name: 'Display PHP versions'
                 run: |
                     php -r 'foreach (get_loaded_extensions() as $extension) echo $extension . " " . phpversion($extension) . PHP_EOL;'
@@ -136,6 +145,9 @@ jobs:
 
             -   name: 'Run tests with coverage'
                 run: vendor/bin/phpunit --coverage-clover coverage/clover.xml
+                env:
+                    LD_PRELOAD: ~/curl-impersonate/libcurl-impersonate-chrome.so
+                    CURL_IMPERSONATE: chrome116
 
             -   name: 'Send Coverage to Codecov'
                 uses: codecov/codecov-action@v3

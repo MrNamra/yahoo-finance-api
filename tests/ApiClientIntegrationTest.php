@@ -16,6 +16,7 @@ use Scheb\YahooFinanceApi\Results\OptionContract;
 use Scheb\YahooFinanceApi\Results\Quote;
 use Scheb\YahooFinanceApi\Results\SearchResult;
 use Scheb\YahooFinanceApi\Results\SplitData;
+use Scheb\YahooFinanceApi\UserAgent;
 
 class ApiClientIntegrationTest extends TestCase
 {
@@ -28,9 +29,9 @@ class ApiClientIntegrationTest extends TestCase
     private const CURRENCY_EUR = 'EUR';
     private const TRY_COUNT = 3;
     private const RETRY_SLEEP_SECONDS = 1;
-
     private const REGION_US = 'en_US';
     private const REGION_GERMANY = 'de_DE';
+    private const USER_AGENT_CHROME_116 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36';
 
     /**
      * @var ApiClient
@@ -40,6 +41,11 @@ class ApiClientIntegrationTest extends TestCase
     public function setUp(): void
     {
         $this->client = ApiClientFactory::createApiClient();
+
+        // Set user agent when impersonating Chrome 116 browser
+        if ('chrome116' === getenv('CURL_IMPERSONATE')) {
+            UserAgent::setUserAgents([self::USER_AGENT_CHROME_116]);
+        }
     }
 
     /**
