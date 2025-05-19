@@ -7,6 +7,7 @@ namespace Scheb\YahooFinanceApi;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Cookie\CookieJar;
+use GuzzleHttp\Cookie\FileCookieJar;
 use Scheb\YahooFinanceApi\Exception\ApiException;
 use Scheb\YahooFinanceApi\Results\DividendData;
 use Scheb\YahooFinanceApi\Results\HistoricalData;
@@ -40,33 +41,19 @@ class ApiClient
      */
     private $userAgent;
 
-    private CookieJar $cookieJar;
+    /**
+     * @var CookieJar
+     */
+    private $cookieJar;
     private $cookiesCacheFile = __DIR__.'/cookies.txt';
     private $crumbCacheFile = __DIR__.'/crumb.txt';
+    private $agentCacheFile = __DIR__.'/agent.txt';
 
     public function __construct(ClientInterface $guzzleClient, ResultDecoder $resultDecoder)
     {
         $this->client = $guzzleClient;
         $this->resultDecoder = $resultDecoder;
-        $this->userAgent = UserAgent::getRandomUserAgent();
-        $this->client = new Client([
-            'headers' => [
-                'User-Agent' => $this->userAgent,
-                'Accept' => 'application/json, text/plain, */*',
-                'Accept-Language' => 'en-US,en;q=0.9',
-                'Referer' => 'https://finance.yahoo.com/',
-                'Origin' => 'https://finance.yahoo.com',
-            ],
-            'http_errors' => false,
-        ]);
-    }
-
-    public function getHeaders(): array
-    {
-        return [
-            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-            // 'Accept' => 'text/html,application/json;q=0.9;*/*',
-        ];
+        $this->userAgent = $this->getAgent();
     }
 
     /**
@@ -85,11 +72,10 @@ class ApiClient
             .'&region=US&quotesCount='.$limit
             .'&quotesQueryId=tss_match_phrase_query&multiQuoteQueryId=multi_quote_single_token_query&enableCb=false&enableNavLinks=true&enableCulturalAssets=true&enableNews=false&enableResearchReports=false&enableLists=false&listsCount=0&recommendCount=0&enablePrivateCompany=true';
 
-        $response = $this->client->request('GET', $url, ['headers' => $this->getHeaders(), 'cookies' => $this->getCookies()]);
+        $response = $this->client->request('GET', $url, ['headers' => $this->getHeader(), 'cookies' => $this->getCookies()]);
 
         $status = $response->getStatusCode();
         if (200 !== $status) {
-            $this->registerClient();
             throw new ApiException("Yahoo search failed (HTTP $status)");
         }
 
@@ -109,7 +95,7 @@ class ApiClient
      */
     public function getHistoricalData(string $symbol, string $interval, \DateTimeInterface $startDate, \DateTimeInterface $endDate): array
     {
-        @trigger_error('[MrNamra/yahoo-finance-api] getHistoricalData() is deprecated and will be removed in a future release', \E_USER_DEPRECATED);
+        @trigger_error('[scheb/yahoo-finance-api] getHistoricalData() is deprecated and will be removed in a future release', \E_USER_DEPRECATED);
 
         return $this->getHistoricalQuoteData($symbol, $interval, $startDate, $endDate);
     }
@@ -221,50 +207,30 @@ class ApiClient
         return $this->fetchQuotes($currencySymbols);
     }
 
-    private function getCookies($forceNew = false): CookieJar
+    private function getCookies($forceNew = false): FileCookieJar
     {
         if (!file_exists($this->cookiesCacheFile) || $forceNew) {
-            $client = new Client([
-                'headers' => [
-                    'User-Agent' => 'Mozilla/5.0',
-                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                ],
-            ]);
-
-            $this->cookieJar = new CookieJar();
+            $this->cookieJar = new FileCookieJar($this->cookiesCacheFile, true);
 
             // Request Yahoo Finance to get cookies
-            $client->request('GET', 'https://finance.yahoo.com/quote/AAPL', [
+            $this->client->request('GET', 'https://finance.yahoo.com/quote/AAPL', [
                 'cookies' => $this->cookieJar,
-                'headers' => $this->getHeaders(),
+                'headers' => [
+                    'User-Agent' => $this->userAgent,
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.8',
+                    'Referer' => 'https://finance.yahoo.com/',
+                    'Origin' => 'https://finance.yahoo.com',
+                ],
                 'http_errors' => false,
             ]);
-            $c = null;
-            foreach ($this->cookieJar->toArray() as $key => $cookie) {
-                $c[$cookie['Name']] = $cookie['Value'];
-            }
-            file_put_contents($this->cookiesCacheFile, json_encode($c));
 
-            return CookieJar::fromArray(json_decode(json_encode($c), true), '.yahoo.com');
+            // Save the cookies to file
+            $this->cookieJar->save($this->cookiesCacheFile);
+        } else {
+            // Load existing cookies from file
+            $this->cookieJar = new FileCookieJar($this->cookiesCacheFile, true);
         }
-        $data = file_get_contents($this->cookiesCacheFile);
-        $data = json_decode($data, true);
-        $cookies = $this->cookieJarToArray($data);
-
-        return $cookies;
-    }
-
-    private function cookieJarToArray($cookies)
-    {
-        $cookieData = [];
-        foreach ($cookies as $key => $cookie) {
-            if (isset($cookie['Name'])) {
-                $cookieData[$cookie['Name']] = $cookie['Value'];
-            } else {
-                $cookieData[$key] = $cookie;
-            }
-        }
-        $this->cookieJar = CookieJar::fromArray($cookieData, '.yahoo.com');
 
         return $this->cookieJar;
     }
@@ -277,7 +243,7 @@ class ApiClient
         if ($forceRefresh || !file_exists($this->crumbCacheFile)) {
             $client = new Client([
                 'headers' => [
-                    'User-Agent' => 'Mozilla/5.0',
+                    'User-Agent' => $this->userAgent,
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 ],
                 'cookies' => $this->getCookies(),
@@ -309,29 +275,24 @@ class ApiClient
 
         $url = 'https://query'.$qs.'.finance.yahoo.com/v7/finance/quote?symbols='.urlencode(implode(',', $symbols)).'&crumb='.$crumb;
 
-        try {
-            $responseBody = (string) $this->client->request('GET', $url, [
-                'cookies' => $this->getCookies(),
-                'headers' => $this->getHeaders(),
-            ])->getBody();
-
-            return $this->resultDecoder->transformQuotes($responseBody);
-        } catch (\GuzzleHttp\Exception\ClientException $e) {
-            // Retry once if Unauthorized
-            if (401 === $e->getResponse()->getStatusCode()) {
+        for ($retries = 0; $retries <= 1; ++$retries) {
+            if (1 === $retries) {
                 $this->refreshCookiesAndCrumb();
-                $crumb = $this->getCrumb();
-
-                $url = 'https://query'.$qs.'.finance.yahoo.com/v7/finance/quote?symbols='.urlencode(implode(',', $symbols)).'&crumb='.$crumb;
+                $this->registerClient();
+            }
+            try {
                 $responseBody = (string) $this->client->request('GET', $url, [
                     'cookies' => $this->getCookies(),
-                    'headers' => $this->getHeaders(),
+                    'headers' => $this->getHeader(),
                 ])->getBody();
 
                 return $this->resultDecoder->transformQuotes($responseBody);
+            } catch (\GuzzleHttp\Exception\ClientException $e) {
+                // Retry once, if Still Error
+                if (1 === $retries) {
+                    throw $e;
+                }
             }
-
-            throw $e;
         }
     }
 
@@ -340,7 +301,7 @@ class ApiClient
         $qs = $this->getRandomQueryServer();
         $dataUrl = 'https://query'.$qs.'.finance.yahoo.com/v8/finance/chart/'.urlencode($symbol).'?period1='.$startDate->getTimestamp().'&period2='.$endDate->getTimestamp().'&interval='.$interval.'&events='.$filter;
 
-        return (string) $this->client->request('GET', $dataUrl, ['headers' => $this->getHeaders()])->getBody();
+        return (string) $this->client->request('GET', $dataUrl, ['headers' => $this->getHeader()])->getBody();
     }
 
     private function validateIntervals(string $interval): void
@@ -376,7 +337,10 @@ class ApiClient
         // Fetch quotes
         $modules = 'financialData,quoteType,defaultKeyStatistics,assetProfile,summaryDetail';
         $url = 'https://query'.$qs.'.finance.yahoo.com/v10/finance/quoteSummary/'.$symbol.'?crumb='.$crumb.'&modules='.$modules;
-        $responseBody = (string) $this->client->request('GET', $url, ['cookies' => $this->getCookies(), 'headers' => $this->getHeaders()])->getBody();
+        $responseBody = (string) $this->client->request('GET', $url, [
+            'cookies' => $this->getCookies(),
+            'headers' => $this->getHeader(),
+        ])->getBody();
 
         return $this->resultDecoder->transformQuotesSummary($responseBody);
     }
@@ -396,52 +360,17 @@ class ApiClient
         if ($expiryDate) {
             $url .= '&date='.(string) $expiryDate->getTimestamp();
         }
-        try {
-            $responseBody = (string) $this->client->request('GET', $url, ['cookies' => $this->getCookies()])->getBody();
-
-            return $this->resultDecoder->transformOptionChains($responseBody);
-        } catch (\GuzzleHttp\Exception\ClientException $e) {
-            if (401 === $e->getResponse()->getStatusCode()) {
-                $this->refreshCookiesAndCrumb();
-
-                // Rebuild URL with updated crumb
-                $crumb = $this->getCrumb();
-                $url = 'https://query'.$qs.'.finance.yahoo.com/v7/finance/options/'.$symbol.'?crumb='.$crumb;
-                if ($expiryDate) {
-                    $url .= '&date='.$expiryDate->getTimestamp();
-                }
-                $this->registerClient();
-
-                $responseBody = (string) $this->client->request('GET', $url, [
-                    'cookies' => $this->getCookies(),
-                    'headers' => $this->getHeaders(),
-                ])->getBody();
+        for ($try = 0; $try < 2; ++$try) {
+            try {
+                $responseBody = (string) $this->client->request('GET', $url, ['cookies' => $this->getCookies()])->getBody();
 
                 return $this->resultDecoder->transformOptionChains($responseBody);
-            }
-
-            throw $e;
-        } catch(ApiException $e) {
-            if($e->getMessage() == "Yahoo Search API returned an invalid result."){
-                $this->refreshCookiesAndCrumb();
-
-                $this->registerClient();
-
-                // Rebuild URL with updated crumb
-                $crumb = file_get_contents($this->crumbCacheFile);
-                $url = 'https://query' . $qs . '.finance.yahoo.com/v7/finance/options/' . $symbol . '?crumb=' . $crumb;
-                if ($expiryDate) {
-                    $url .= '&date=' . $expiryDate->getTimestamp();
+            } catch (\Exception $e) {
+                if (1 === $try) {
+                    throw $e;
                 }
-
-                $responseBody = (string) $this->client->request('GET', $url, [
-                    'cookies' => $this->getCookies(),
-                    'headers' => $this->getHeaders()
-                ])->getBody();
-
-                return $this->resultDecoder->transformOptionChains($responseBody);
+                $this->refreshCookiesAndCrumb();
             }
-            throw $e;
         }
     }
 
@@ -450,16 +379,34 @@ class ApiClient
         $qs = $this->getRandomQueryServer();
 
         // Fetch crumb using the same cookieJar
-        $this->getCookies(true);
         $this->getCrumb($qs, true);
+        $this->getCookies(true);
+        $this->getAgent(true);
 
         return;
     }
 
-    public function registerClient()
+    private function registerClient()
     {
-        $this->client->request('GET', 'https://finance.yahoo.com/', [
-            'headers' => ['User-Agent' => $this->userAgent],
-        ]);
+        $this->client->request('GET', 'https://finance.yahoo.com/', ['headers' => $this->getHeader()]);
+    }
+
+    private function getAgent($forceNew = false)
+    {
+        if (!file_exists($this->agentCacheFile) || $forceNew) {
+            $this->userAgent = UserAgent::getRandomUserAgent();
+            file_put_contents($this->agentCacheFile, $this->userAgent);
+        } else {
+            $this->userAgent = file_get_contents($this->agentCacheFile);
+        }
+
+        return $this->userAgent;
+    }
+
+    private function getHeader()
+    {
+        return [
+            'User-Agent' => $this->userAgent,
+        ];
     }
 }
