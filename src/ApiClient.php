@@ -45,8 +45,7 @@ class ApiClient
      * @var FileCookieJar
      */
     private $cookieJar;
-    
-    
+
     /**
      * @var string
      */
@@ -67,6 +66,7 @@ class ApiClient
         $this->client = $guzzleClient;
         $this->resultDecoder = $resultDecoder;
         $this->userAgent = $this->getAgent();
+        $this->cookieJar = $this->getCookies();
     }
 
     /**
@@ -85,7 +85,7 @@ class ApiClient
             .'&region=US&quotesCount='.$limit
             .'&quotesQueryId=tss_match_phrase_query&multiQuoteQueryId=multi_quote_single_token_query&enableCb=false&enableNavLinks=true&enableCulturalAssets=true&enableNews=false&enableResearchReports=false&enableLists=false&listsCount=0&recommendCount=0&enablePrivateCompany=true';
 
-        $response = $this->client->request('GET', $url, ['headers' => $this->getHeader(), 'cookies' => $this->getCookies()]);
+        $response = $this->client->request('GET', $url, ['headers' => $this->getHeader(), 'cookies' => $this->cookieJar]);
 
         $status = $response->getStatusCode();
         if (200 !== $status) {
@@ -259,8 +259,7 @@ class ApiClient
                     'User-Agent' => $this->userAgent,
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 ],
-                'cookies' => $this->getCookies(),
-                'http_errors' => false,
+                'cookies' => $this->cookieJar,
             ]);
 
             // Then get crumb
@@ -291,25 +290,22 @@ class ApiClient
         for ($retries = 0; $retries <= 1; ++$retries) {
             if (1 === $retries) {
                 $this->refreshCookiesAndCrumb();
-                $this->registerClient();
             }
             try {
                 $responseBody = (string) $this->client->request('GET', $url, [
-                    'cookies' => $this->getCookies(),
+                    'cookies' => $this->cookieJar,
                     'headers' => $this->getHeader(),
                 ])->getBody();
 
                 return $this->resultDecoder->transformQuotes($responseBody);
-            } catch (\GuzzleHttp\Exception\ClientException $e) {
+            } catch (\Exception $e) {
                 // Retry once, if Still Error
                 if (1 === $retries) {
-                    return [
-                        'error' => true,
-                        'message' => $e->getMessage(),
-                    ];
+                    throw new ApiException("Fail to Fetch data from Yahoo (ERROR {$e->getMessage()})");
                 }
             }
         }
+        throw new ApiException("Something Want Wrong!");
     }
 
     private function getHistoricalDataResponseBodyJson(string $symbol, string $interval, \DateTimeInterface $startDate, \DateTimeInterface $endDate, string $filter): string
@@ -345,16 +341,16 @@ class ApiClient
         $qs = $this->getRandomQueryServer();
 
         // Initialize session cookies
-        $cookieJar = $this->getCookies();
+        $cookieJar = $this->cookieJar;
 
         // Get crumb value
-        $crumb = $this->getCrumb($qs, $cookieJar);
+        $crumb = $this->getCrumb();
 
         // Fetch quotes
         $modules = 'financialData,quoteType,defaultKeyStatistics,assetProfile,summaryDetail';
         $url = 'https://query'.$qs.'.finance.yahoo.com/v10/finance/quoteSummary/'.$symbol.'?crumb='.$crumb.'&modules='.$modules;
         $responseBody = (string) $this->client->request('GET', $url, [
-            'cookies' => $this->getCookies(),
+            'cookies' => $this->cookieJar,
             'headers' => $this->getHeader(),
         ])->getBody();
 
@@ -364,9 +360,6 @@ class ApiClient
     public function getOptionChain(string $symbol, ?\DateTimeInterface $expiryDate = null): array
     {
         $qs = $this->getRandomQueryServer();
-
-        // Initialize session cookies
-        $this->cookieJar = $this->getCookies();
 
         // Get crumb value
         $crumb = $this->getCrumb($qs);
@@ -378,19 +371,17 @@ class ApiClient
         }
         for ($try = 0; $try < 2; ++$try) {
             try {
-                $responseBody = (string) $this->client->request('GET', $url, ['cookies' => $this->getCookies()])->getBody();
+                $responseBody = (string) $this->client->request('GET', $url, ['cookies' => $this->cookieJar])->getBody();
 
                 return $this->resultDecoder->transformOptionChains($responseBody);
             } catch (\Exception $e) {
                 if (1 === $try) {
-                    return [
-                        'error' => true,
-                        'message' => $e->getMessage()
-                    ];
+                    throw new ApiException("Fail to Fetch data from Yahoo (ERROR {$e->getMessage()})");
                 }
                 $this->refreshCookiesAndCrumb();
             }
         }
+        throw new ApiException("Something Want Wrong!");
     }
 
     private function refreshCookiesAndCrumb(): void
@@ -401,6 +392,7 @@ class ApiClient
         $this->getCrumb($qs, true);
         $this->getCookies(true);
         $this->getAgent(true);
+        $this->registerClient();
 
         return;
     }
