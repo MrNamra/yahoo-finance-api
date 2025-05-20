@@ -42,11 +42,24 @@ class ApiClient
     private $userAgent;
 
     /**
-     * @var CookieJar
+     * @var FileCookieJar
      */
     private $cookieJar;
+    
+    
+    /**
+     * @var string
+     */
     private $cookiesCacheFile = __DIR__.'/cookies.txt';
+
+    /**
+     * @var string
+     */
     private $crumbCacheFile = __DIR__.'/crumb.txt';
+
+    /**
+     * @var string
+     */
     private $agentCacheFile = __DIR__.'/agent.txt';
 
     public function __construct(ClientInterface $guzzleClient, ResultDecoder $resultDecoder)
@@ -207,7 +220,7 @@ class ApiClient
         return $this->fetchQuotes($currencySymbols);
     }
 
-    private function getCookies($forceNew = false): FileCookieJar
+    private function getCookies(bool $forceNew = false): FileCookieJar
     {
         if (!file_exists($this->cookiesCacheFile) || $forceNew) {
             $this->cookieJar = new FileCookieJar($this->cookiesCacheFile, true);
@@ -238,7 +251,7 @@ class ApiClient
     /**
      * Get the crumb value from the Yahoo Finance API.
      */
-    private function getCrumb($qs = 1, $forceRefresh = false)
+    private function getCrumb(int $qs = 1, bool $forceRefresh = false): string
     {
         if ($forceRefresh || !file_exists($this->crumbCacheFile)) {
             $client = new Client([
@@ -267,7 +280,7 @@ class ApiClient
      *
      * @return Quote[]
      */
-    private function fetchQuotes(array $symbols)
+    private function fetchQuotes(array $symbols): array
     {
         $qs = $this->getRandomQueryServer();
 
@@ -290,7 +303,10 @@ class ApiClient
             } catch (\GuzzleHttp\Exception\ClientException $e) {
                 // Retry once, if Still Error
                 if (1 === $retries) {
-                    throw $e;
+                    return [
+                        'error' => true,
+                        'message' => $e->getMessage(),
+                    ];
                 }
             }
         }
@@ -367,7 +383,10 @@ class ApiClient
                 return $this->resultDecoder->transformOptionChains($responseBody);
             } catch (\Exception $e) {
                 if (1 === $try) {
-                    throw $e;
+                    return [
+                        'error' => true,
+                        'message' => $e->getMessage()
+                    ];
                 }
                 $this->refreshCookiesAndCrumb();
             }
@@ -386,12 +405,12 @@ class ApiClient
         return;
     }
 
-    private function registerClient()
+    private function registerClient(): void
     {
         $this->client->request('GET', 'https://finance.yahoo.com/', ['headers' => $this->getHeader()]);
     }
 
-    private function getAgent($forceNew = false)
+    private function getAgent(bool $forceNew = false): string
     {
         if (!file_exists($this->agentCacheFile) || $forceNew) {
             $this->userAgent = UserAgent::getRandomUserAgent();
@@ -403,7 +422,7 @@ class ApiClient
         return $this->userAgent;
     }
 
-    private function getHeader()
+    private function getHeader(): array
     {
         return [
             'User-Agent' => $this->userAgent,
