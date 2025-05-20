@@ -305,7 +305,7 @@ class ApiClient
                 }
             }
         }
-        throw new ApiException("Something Want Wrong!");
+        throw new ApiException('Something Want Wrong!');
     }
 
     private function getHistoricalDataResponseBodyJson(string $symbol, string $interval, \DateTimeInterface $startDate, \DateTimeInterface $endDate, string $filter): string
@@ -381,7 +381,7 @@ class ApiClient
                 $this->refreshCookiesAndCrumb();
             }
         }
-        throw new ApiException("Something Want Wrong!");
+        throw new ApiException('Something Want Wrong!');
     }
 
     private function refreshCookiesAndCrumb(): void
