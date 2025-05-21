@@ -7,7 +7,9 @@ namespace Scheb\YahooFinanceApi;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Cookie\CookieJar;
-use GuzzleHttp\Cookie\FileCookieJar;
+use GuzzleHttp\Cookie\CookieJarInterface;
+use GuzzleHttp\Cookie\SessionCookieJar;
+use Psr\Cache\CacheItemPoolInterface;
 use Scheb\YahooFinanceApi\Exception\ApiException;
 use Scheb\YahooFinanceApi\Results\DividendData;
 use Scheb\YahooFinanceApi\Results\HistoricalData;
@@ -42,29 +44,20 @@ class ApiClient
     private $userAgent;
 
     /**
-     * @var FileCookieJar
+     * @var CacheItemPoolInterface
+     */
+    private $cache;
+
+    /**
+     * @var CookieJarInterface
      */
     private $cookieJar;
 
-    /**
-     * @var string
-     */
-    private $cookiesCacheFile = __DIR__.'/cookies.txt';
-
-    /**
-     * @var string
-     */
-    private $crumbCacheFile = __DIR__.'/crumb.txt';
-
-    /**
-     * @var string
-     */
-    private $agentCacheFile = __DIR__.'/agent.txt';
-
-    public function __construct(ClientInterface $guzzleClient, ResultDecoder $resultDecoder)
+    public function __construct(ClientInterface $guzzleClient, ResultDecoder $resultDecoder, CacheItemPoolInterface $cache)
     {
         $this->client = $guzzleClient;
         $this->resultDecoder = $resultDecoder;
+        $this->cache = $cache;
         $this->userAgent = $this->getAgent();
         $this->cookieJar = $this->getCookies();
     }
@@ -220,14 +213,14 @@ class ApiClient
         return $this->fetchQuotes($currencySymbols);
     }
 
-    private function getCookies(bool $forceNew = false): FileCookieJar
+    private function getCookies(bool $force = false): CookieJar
     {
-        if (!file_exists($this->cookiesCacheFile) || $forceNew) {
-            $this->cookieJar = new FileCookieJar($this->cookiesCacheFile, true);
+        $cacheItem = $this->cache->getItem('yahoo_cookies_tmp');
 
-            // Request Yahoo Finance to get cookies
+        if (!$cacheItem->isHit() || $force) {
+            $jar = new SessionCookieJar('YAHOO_SESSION_TMP', true);
             $this->client->request('GET', 'https://finance.yahoo.com/quote/AAPL', [
-                'cookies' => $this->cookieJar,
+                'cookies' => $jar,
                 'headers' => [
                     'User-Agent' => $this->userAgent,
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -235,17 +228,16 @@ class ApiClient
                     'Referer' => 'https://finance.yahoo.com/',
                     'Origin' => 'https://finance.yahoo.com',
                 ],
-                'http_errors' => false,
             ]);
 
-            // Save the cookies to file
-            $this->cookieJar->save($this->cookiesCacheFile);
+            $cacheItem->set(serialize($jar))->expiresAfter(3600);
+            $this->cache->save($cacheItem);
+            $this->cookieJar = $jar;
         } else {
-            // Load existing cookies from file
-            $this->cookieJar = new FileCookieJar($this->cookiesCacheFile, true);
+            $jar = unserialize($cacheItem->get());
         }
 
-        return $this->cookieJar;
+        return $jar;
     }
 
     /**
@@ -253,25 +245,34 @@ class ApiClient
      */
     private function getCrumb(int $qs = 1, bool $forceRefresh = false): string
     {
-        if ($forceRefresh || !file_exists($this->crumbCacheFile)) {
+        $cacheItem = $this->cache->getItem('yahoo_crumb');
+
+        if ($forceRefresh || !$cacheItem->isHit()) {
+            $jar = new SessionCookieJar('YAHOO_SESSION_TMP', true);
+
             $client = new Client([
                 'headers' => [
                     'User-Agent' => $this->userAgent,
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 ],
-                'cookies' => $this->cookieJar,
+                'cookies' => $this->getCookies(),
             ]);
 
-            // Then get crumb
-            $res = $client->request('GET', 'https://query'.(string) $qs.'.finance.yahoo.com/v1/test/getcrumb');
+            $res = $client->request('GET', 'https://query'.$qs.'.finance.yahoo.com/v1/test/getcrumb');
             $crumb = (string) $res->getBody();
 
-            file_put_contents($this->crumbCacheFile, $crumb);
+            // Overwrite the existing cookies with the new ones obtained during the crumb process
+            $cacheItem->set(serialize($jar))->expiresAfter(3600);
+            $this->cache->save($cacheItem);
+            $this->cookieJar = $jar;
+
+            $cacheItem->set($crumb)->expiresAfter(3600);
+            $this->cache->save($cacheItem);
 
             return $crumb;
         }
 
-        return file_get_contents($this->crumbCacheFile);
+        return $cacheItem->get();
     }
 
     /**
@@ -389,29 +390,33 @@ class ApiClient
         $qs = $this->getRandomQueryServer();
 
         // Fetch crumb using the same cookieJar
-        $this->getCrumb($qs, true);
-        $this->getCookies(true);
         $this->getAgent(true);
-        $this->registerClient();
+        $this->getCrumb($qs, true);
+        // hold for 3 seconds for save from quickly calls api
+        sleep(3);
 
         return;
     }
 
-    private function registerClient(): void
-    {
-        $this->client->request('GET', 'https://finance.yahoo.com/', ['headers' => $this->getHeader()]);
-    }
+    // if all working good without this function we will remove it
+    // private function registerClient(): void
+    // {
+    //     $this->client->request('GET', 'https://finance.yahoo.com/', ['headers' => $this->getHeader()]);
+    // }
 
     private function getAgent(bool $forceNew = false): string
     {
-        if (!file_exists($this->agentCacheFile) || $forceNew) {
-            $this->userAgent = UserAgent::getRandomUserAgent();
-            file_put_contents($this->agentCacheFile, $this->userAgent);
-        } else {
-            $this->userAgent = file_get_contents($this->agentCacheFile);
+        $cacheItem = $this->cache->getItem('yahoo_user_agent');
+
+        if ($forceNew || !$cacheItem->isHit()) {
+            $agent = UserAgent::getRandomUserAgent();
+            $cacheItem->set($agent)->expiresAfter(3600);
+            $this->cache->save($cacheItem);
+
+            return $agent;
         }
 
-        return $this->userAgent;
+        return $cacheItem->get();
     }
 
     private function getHeader(): array
